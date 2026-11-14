@@ -105,7 +105,7 @@
 		[Note, [StrMerge, "Failed to write config file:", nl, configPath]]
 		[Exit]
 	]
-	[VarSet, err, [FileExecute, [Var, dllPath], "LaunchAppWithFile", #configPath, #exePath]]
+	[VarSet, err, [FileExecute, [Var, dllPath], "LaunchAppWithFile", #exePath]]
 
 	// 3. Wait for atomic output file (up to 300 seconds)
 	[VarSet, found, 0]
