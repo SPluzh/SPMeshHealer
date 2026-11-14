@@ -31,34 +31,15 @@
 [RoutineDef, ResolvePaths,
 	[VarSet, nl, [StrMerge, [StrFromAsc, 13], [StrFromAsc, 10]]]
 	[VarSet, exePath, [FileNameResolvePath, "SPMeshHealerData/SPMeshHealer.exe"]]
+	[VarSet, configPath, [FileNameResolvePath, "SPMeshHealerData/config.txt"]]
 
 	// Determine extension from UI switches (default: GoZ)
 	[VarSet, ext, ".goz"]
 	[If, [IGet, "ZPlugin:SPMeshHealer:Format OBJ"] == 1, [VarSet, ext, ".obj"]]
 	[If, [IGet, "ZPlugin:SPMeshHealer:Format STL"] == 1, [VarSet, ext, ".stl"]]
 
-	// Resolve writable public working folder via ZFileUtils64 GetPublicFolder (avoids Program Files UAC/VirtualStore)
-	[VarSet, pubFolder, ""]
-	[If, [MemGetSize, SPMH_PubMem], [MemDelete, SPMH_PubMem]]
-	[MemCreate, SPMH_PubMem, 512, 0]
-	[FileExecute, [Var, dllPath], "GetPublicFolder", , , SPMH_PubMem]
-	[MemReadString, SPMH_PubMem, pubFolder]
-	[MemDelete, SPMH_PubMem]
-
-	[If, [StrLength, pubFolder] > 0,
-		[VarSet, workDir, [StrMerge, pubFolder, "ZPluginData/SPMeshHealerData/"]]
-		[VarSet, dirExists, [FileExecute, [Var, dllPath], "FolderExists", #workDir]]
-		[If, dirExists == 0,
-			[FileExecute, [Var, dllPath], "CreateFolder", #workDir]
-		]
-		[VarSet, configPath, [StrMerge, workDir, "config.txt"]]
-		[VarSet, expPath, [StrMerge, workDir, "SPMeshHealer_in", ext]]
-		[VarSet, impPath, [StrMerge, workDir, "SPMeshHealer_out", ext]]
-	,
-		[VarSet, configPath, [FileNameResolvePath, "SPMeshHealerData/config.txt"]]
-		[VarSet, expPath, [FileNameResolvePath, [StrMerge, "SPMeshHealerData/SPMeshHealer_in", ext]]]
-		[VarSet, impPath, [FileNameResolvePath, [StrMerge, "SPMeshHealerData/SPMeshHealer_out", ext]]]
-	]
+	[VarSet, expPath, [FileNameResolvePath, [StrMerge, "SPMeshHealerData/SPMeshHealer_in", ext]]]
+	[VarSet, impPath, [FileNameResolvePath, [StrMerge, "SPMeshHealerData/SPMeshHealer_out", ext]]]
 ]
 
 [RoutineDef, WriteConfig,
@@ -80,12 +61,8 @@
 	[If, [MemGetSize, SPMH_CfgMem], [MemDelete, SPMH_CfgMem]]
 	[MemCreate, SPMH_CfgMem, cfgLen, 0]
 	[MemWriteString, SPMH_CfgMem, cfgBuf, 0, 0]
-	[VarSet, tmpCfg, [StrMerge, configPath, ".tmp"]]
-	[If, [FileExists, tmpCfg], [FileExecute, [Var, dllPath], "FileDelete", #tmpCfg]]
-	[MemSaveToFile, SPMH_CfgMem, tmpCfg, 1]
+	[MemSaveToFile, SPMH_CfgMem, configPath, 1]
 	[MemDelete, SPMH_CfgMem]
-	[If, [FileExists, configPath], [FileExecute, [Var, dllPath], "FileDelete", #configPath]]
-	[FileExecute, [Var, dllPath], "FileRename", #tmpCfg, #configPath]
 ]
 
 [RoutineDef, HealMesh,
