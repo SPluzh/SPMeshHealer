@@ -279,6 +279,7 @@ int main(int argc, char* argv[]) {
     (void)showConsole;
 #endif
 
+    const bool inFromCli = !inPath.empty();
     if (inPath.empty()) {
         if (!cfgInPath.empty()) {
             inPath = cfgInPath;
@@ -288,8 +289,13 @@ int main(int argc, char* argv[]) {
         }
     }
     if (outPath.empty()) {
-        if (!cfgOutPath.empty()) {
+        if (!inFromCli && !cfgOutPath.empty()) {
             outPath = cfgOutPath;
+        } else if (inFromCli) {
+            fs::path inP(inPath);
+            std::string ext = inP.extension().string();
+            if (toLower(ext) == ".fbx") ext = ".obj";
+            outPath = (inP.parent_path() / (inP.stem().string() + "_healed" + ext)).string();
         } else {
             fs::path tmpDir = getTempWorkDir();
             outPath = (tmpDir / "output.stl").string();
