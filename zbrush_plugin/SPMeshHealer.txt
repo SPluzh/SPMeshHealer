@@ -47,12 +47,13 @@
 	[VarSet, pgVal, [IGet, "ZPlugin:SPMeshHealer:Preserve PolyGroups"]]
 	[VarSet, quadsVal, [IGet, "ZPlugin:SPMeshHealer:Keep Quads"]]
 	[VarSet, fragVal, [IGet, "ZPlugin:SPMeshHealer:Remove Small Fragments"]]
+	[VarSet, conVal, [IGet, "ZPlugin:SPMeshHealer:Show Console"]]
 
 	[VarSet, l1, [StrMerge, "hull = ", hullVal, nl]]
 	[VarSet, l2, [StrMerge, "preservePolygroups = ", pgVal, nl]]
 	[VarSet, l3, [StrMerge, "keepQuads = ", quadsVal, nl]]
 	[VarSet, l4, [StrMerge, "removeFragments = ", fragVal, nl]]
-	[VarSet, l5, [StrMerge, "minFaces = 50", nl, "minFraction = 0.01", nl, "fixOrientation = 1", nl]]
+	[VarSet, l5, [StrMerge, "showConsole = ", conVal, nl, "minFaces = 50", nl, "minFraction = 0.01", nl, "fixOrientation = 1", nl]]
 	[VarSet, l6, [StrMerge, "inFile = ", expPath, nl]]
 	[VarSet, l7, [StrMerge, "outFile = ", impPath, nl]]
 
@@ -158,6 +159,12 @@
 	[IEnable, "ZPlugin:SPMeshHealer:Remove Small Fragments"]
 ,
 	[IEnable, "ZPlugin:SPMeshHealer:Remove Small Fragments"]
+, 0, 1]
+
+[ISwitch, "ZPlugin:SPMeshHealer:Show Console", 0, "Show console window during processing.",
+	[IEnable, "ZPlugin:SPMeshHealer:Show Console"]
+,
+	[IEnable, "ZPlugin:SPMeshHealer:Show Console"]
 , 0, 1]
 
 [ISwitch, "ZPlugin:SPMeshHealer:Format GoZ", 1, "Use GoZ binary format (fastest, preserves PolyGroups/Mask/Paint).",

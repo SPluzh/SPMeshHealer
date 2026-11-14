@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <cstdio>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
@@ -99,7 +100,7 @@ private:
     std::ofstream m_file;
 };
 
-void loadConfigFile(const fs::path& cfgPath, HealerOptions& opts, std::string& cfgInPath, std::string& cfgOutPath) {
+void loadConfigFile(const fs::path& cfgPath, HealerOptions& opts, std::string& cfgInPath, std::string& cfgOutPath, bool& showConsole) {
     std::ifstream in(cfgPath);
     if (!in.is_open()) return;
 
@@ -127,6 +128,7 @@ void loadConfigFile(const fs::path& cfgPath, HealerOptions& opts, std::string& c
             else if (key == "removefragments" || key == "removesmallfragments") opts.removeFragments = (std::stoi(val) != 0);
             else if (key == "minfaces" || key == "fragmentminfaces") opts.minFragmentFaces = std::stoi(val);
             else if (key == "minfraction" || key == "fragmentminfraction") opts.minFragmentFraction = std::stof(val);
+            else if (key == "showconsole") showConsole = (std::stoi(val) != 0);
             else if (key == "infile") cfgInPath = val;
             else if (key == "outfile") cfgOutPath = val;
         } catch (...) {
@@ -171,6 +173,7 @@ void printUsage() {
               << "  --min-faces <N>       Min face count to keep an island (default: 50)\n"
               << "  --min-frac <F>        Min face fraction to keep an island (default: 0.01)\n"
               << "  --config <path>       Path to config.txt (default: next to executable)\n"
+              << "  --show-console <0|1>  1 = open a console window (default: 0)\n"
               << "  --quiet               Suppress console output\n";
 }
 
@@ -190,6 +193,7 @@ int main(int argc, char* argv[]) {
     bool forceBin = false;
     bool hullExplicit = false;
     bool repairSoupExplicit = false;
+    bool showConsole = false;
 
     // First pass: check --config, --log, or a positional .txt config file
     for (int i = 1; i < argc; ++i) {
@@ -203,7 +207,7 @@ int main(int argc, char* argv[]) {
             if (tail == ".txt") configPath = a;
         }
     }
-    loadConfigFile(configPath, opts, cfgInPath, cfgOutPath);
+    loadConfigFile(configPath, opts, cfgInPath, cfgOutPath, showConsole);
     FileLogger logger(logPath, fallbackLogPath);
 
     for (int i = 1; i < argc; ++i) {
@@ -239,6 +243,8 @@ int main(int argc, char* argv[]) {
             opts.minFragmentFaces = std::stoi(argv[++i]);
         } else if (arg == "--min-frac" && i + 1 < argc) {
             opts.minFragmentFraction = std::stof(argv[++i]);
+        } else if (arg == "--show-console" && i + 1 < argc) {
+            showConsole = (std::stoi(argv[++i]) != 0);
         } else if (arg == "--quiet") {
             opts.quiet = true;
         } else if (arg[0] != '-') {
@@ -251,6 +257,27 @@ int main(int argc, char* argv[]) {
         }
     }
     (void)hullExplicit;
+
+#ifdef _WIN32
+    if (showConsole) {
+        if (AllocConsole()) {
+            FILE* fp = nullptr;
+            freopen_s(&fp, "CONOUT$", "w", stdout);
+            freopen_s(&fp, "CONOUT$", "w", stderr);
+        }
+    } else if (!opts.quiet) {
+        HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+        if (hOut == nullptr || hOut == INVALID_HANDLE_VALUE || GetFileType(hOut) == FILE_TYPE_UNKNOWN) {
+            if (AttachConsole(ATTACH_PARENT_PROCESS)) {
+                FILE* fp = nullptr;
+                freopen_s(&fp, "CONOUT$", "w", stdout);
+                freopen_s(&fp, "CONOUT$", "w", stderr);
+            }
+        }
+    }
+#else
+    (void)showConsole;
+#endif
 
     if (inPath.empty()) {
         if (!cfgInPath.empty()) {
