@@ -184,11 +184,17 @@ int main(int argc, char* argv[]) {
     bool hullExplicit = false;
     bool repairSoupExplicit = false;
 
-    // First pass: check --config and --log
-    for (int i = 1; i + 1 < argc; ++i) {
+    // First pass: check --config, --log, or a positional .txt config file
+    for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
-        if (a == "--config") configPath = argv[i + 1];
-        else if (a == "--log") logPath = argv[i + 1];
+        if (a == "--config" && i + 1 < argc) { configPath = argv[++i]; }
+        else if (a == "--log" && i + 1 < argc) { logPath = argv[++i]; }
+        else if (a == "--in" || a == "--out") { ++i; }
+        else if (a[0] != '-' && a.size() > 4) {
+            std::string tail = a.substr(a.size() - 4);
+            for (char& c : tail) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            if (tail == ".txt") configPath = a;
+        }
     }
     loadConfigFile(configPath, opts, cfgInPath, cfgOutPath);
     FileLogger logger(logPath);
@@ -229,8 +235,12 @@ int main(int argc, char* argv[]) {
         } else if (arg == "--quiet") {
             opts.quiet = true;
         } else if (arg[0] != '-') {
-            if (inPath.empty()) inPath = arg;
-            else if (outPath.empty()) outPath = arg;
+            std::string tail = (arg.size() > 4) ? arg.substr(arg.size() - 4) : "";
+            for (char& c : tail) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            if (tail != ".txt") {
+                if (inPath.empty()) inPath = arg;
+                else if (outPath.empty()) outPath = arg;
+            }
         }
     }
     (void)hullExplicit;

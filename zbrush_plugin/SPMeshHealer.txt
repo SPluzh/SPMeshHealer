@@ -93,7 +93,11 @@
 
 	// 2. Write config with temp paths & options, then launch SPMeshHealer.exe
 	[RoutineCall, WriteConfig]
-	[VarSet, err, [FileExecute, [Var, dllPath], "LaunchAppWithFile", #exePath]]
+	[If, [FileExists, configPath], ,
+		[Note, [StrMerge, "Failed to write config file:", nl, configPath]]
+		[Exit]
+	]
+	[VarSet, err, [FileExecute, [Var, dllPath], "LaunchAppWithFile", #configPath, #exePath]]
 
 	// 3. Wait for atomic output file (up to 60 seconds)
 	[VarSet, found, 0]
