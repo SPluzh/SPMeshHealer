@@ -16,10 +16,15 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <iostream>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 namespace {
 
@@ -260,7 +265,249 @@ bool healMesh(const RawMeshData& input, RawMeshData& output, const HealerOptions
 
     auto fIsPatch = mesh.add_property_map<Mesh::Face_index, uint8_t>("f:is_patch", 0).first;
 
+    std::vector<uint8_t> holeDone(holes.size(), 0);
+
+    // Parallel pass: extract isolated 2-ring local submeshes for small/medium holes and solve in parallel
+    {
+        struct LocalHoleJob {
+            size_t holeIdx = 0;
+            size_t bCount = 0;
+            uint32_t hSrcLocal = 0;
+            uint32_t hTgtLocal = 0;
+            std::vector<Point_3> pts;
+            std::vector<Mesh::Vertex_index> globalV;
+            std::vector<std::array<uint32_t, 3>> tris;
+        };
+        struct LocalHoleResult {
+            bool ok = false;
+            std::vector<Point_3> newVerts;
+            std::vector<std::array<int32_t, 3>> newTris; // >= 0: index into job.globalV; < 0: -1 - index into newVerts
+        };
+
+        const uint32_t maxV = mesh.number_of_vertices() + mesh.number_of_removed_vertices();
+        const uint32_t maxF = mesh.number_of_faces() + mesh.number_of_removed_faces();
+        std::vector<uint8_t> usedBoundaryVert(maxV, 0);
+        std::vector<uint32_t> vStamp(maxV, 0);
+        std::vector<uint32_t> fStamp(maxF, 0);
+        std::vector<uint32_t> vLocalIdx(maxV, 0);
+        uint32_t stamp = 0;
+
+        std::vector<LocalHoleJob> jobs;
+        jobs.reserve(holes.size());
+
+        std::vector<Mesh::Vertex_index> bVerts;
+        std::vector<Mesh::Vertex_index> ring1;
+        std::vector<Mesh::Face_index> localFaces;
+
+        for (size_t hi = 0; hi < holes.size(); ++hi) {
+            auto h = holes[hi];
+            if (hasOuterHull && h == outerHull) continue;
+            if (!CGAL::is_border(h, mesh)) continue;
+
+            bVerts.clear();
+            bool skip = false;
+            Mesh::Halfedge_index cur = h;
+            do {
+                auto v = mesh.target(cur);
+                uint32_t vid = static_cast<uint32_t>(v);
+                if (vid >= maxV || usedBoundaryVert[vid]) {
+                    skip = true;
+                    break;
+                }
+                bVerts.push_back(v);
+                cur = mesh.next(cur);
+                if (bVerts.size() > 512) {
+                    skip = true;
+                    break;
+                }
+            } while (cur != h);
+
+            if (skip || bVerts.size() < 3) continue;
+            if (opts.maxHoleVerts > 0 && static_cast<int>(bVerts.size()) > opts.maxHoleVerts) continue;
+
+            // Check for pinch vertices (same vertex appears twice on this boundary loop)
+            ++stamp;
+            for (auto v : bVerts) {
+                uint32_t vid = static_cast<uint32_t>(v);
+                if (vStamp[vid] == stamp) { skip = true; break; }
+                vStamp[vid] = stamp;
+            }
+            if (skip) continue;
+
+            for (auto v : bVerts) usedBoundaryVert[static_cast<uint32_t>(v)] = 1;
+
+            // Collect 1-ring vertices around boundary, then all faces incident to 1-ring (full 2-ring)
+            ring1 = bVerts;
+            for (auto bv : bVerts) {
+                for (auto nv : CGAL::vertices_around_target(mesh.halfedge(bv), mesh)) {
+                    uint32_t nvid = static_cast<uint32_t>(nv);
+                    if (nvid < maxV && vStamp[nvid] != stamp) {
+                        vStamp[nvid] = stamp;
+                        ring1.push_back(nv);
+                    }
+                }
+            }
+
+            ++stamp; // new stamp for building local vertex/face indices
+            localFaces.clear();
+            for (auto rv : ring1) {
+                for (auto f : CGAL::faces_around_target(mesh.halfedge(rv), mesh)) {
+                    if (!f.is_valid() || f == Mesh::null_face()) continue;
+                    uint32_t fid = static_cast<uint32_t>(f);
+                    if (fid < maxF && fStamp[fid] != stamp) {
+                        fStamp[fid] = stamp;
+                        localFaces.push_back(f);
+                    }
+                }
+            }
+            if (localFaces.empty()) continue;
+
+            LocalHoleJob job;
+            job.holeIdx = hi;
+            job.bCount = bVerts.size();
+            job.tris.reserve(localFaces.size());
+
+            auto getOrAddLocalV = [&](Mesh::Vertex_index gv) -> uint32_t {
+                uint32_t gvid = static_cast<uint32_t>(gv);
+                if (vStamp[gvid] != stamp) {
+                    vStamp[gvid] = stamp;
+                    uint32_t lid = static_cast<uint32_t>(job.pts.size());
+                    vLocalIdx[gvid] = lid;
+                    job.pts.push_back(mesh.point(gv));
+                    job.globalV.push_back(gv);
+                    return lid;
+                }
+                return vLocalIdx[gvid];
+            };
+
+            for (auto f : localFaces) {
+                uint32_t tri[3];
+                int k = 0;
+                for (auto v : CGAL::vertices_around_face(mesh.halfedge(f), mesh)) {
+                    if (k < 3) tri[k] = getOrAddLocalV(v);
+                    ++k;
+                }
+                if (k == 3) job.tris.push_back({ tri[0], tri[1], tri[2] });
+            }
+
+            job.hSrcLocal = getOrAddLocalV(mesh.source(h));
+            job.hTgtLocal = getOrAddLocalV(mesh.target(h));
+            jobs.push_back(std::move(job));
+        }
+
+        std::vector<LocalHoleResult> results(jobs.size());
+
+        #pragma omp parallel for schedule(dynamic, 4) if(jobs.size() > 8)
+        for (int ji = 0; ji < static_cast<int>(jobs.size()); ++ji) {
+            const auto& job = jobs[ji];
+            auto& res = results[ji];
+
+            Mesh localMesh;
+            std::vector<Mesh::Vertex_index> lvHandles(job.pts.size());
+            for (size_t i = 0; i < job.pts.size(); ++i) {
+                lvHandles[i] = localMesh.add_vertex(job.pts[i]);
+            }
+            for (const auto& t : job.tris) {
+                if (localMesh.add_face(lvHandles[t[0]], lvHandles[t[1]], lvHandles[t[2]]) == Mesh::null_face()) {
+                    res.ok = false;
+                    break;
+                }
+            }
+            if (localMesh.number_of_faces() != job.tris.size()) continue;
+
+            Mesh::Halfedge_index localH = localMesh.halfedge(lvHandles[job.hSrcLocal], lvHandles[job.hTgtLocal]);
+            if (!localH.is_valid() || !CGAL::is_border(localH, localMesh)) continue;
+
+            // Verify boundary loop length matches original hole
+            size_t bLen = 0;
+            Mesh::Halfedge_index lcur = localH;
+            do {
+                ++bLen;
+                lcur = localMesh.next(lcur);
+                if (bLen > job.bCount) break;
+            } while (lcur != localH);
+            if (bLen != job.bCount) continue;
+
+            std::vector<Mesh::Face_index> patchFaces;
+            std::vector<Mesh::Vertex_index> patchVerts;
+            auto [ok, fo, vo] = PMP::triangulate_refine_and_fair_hole(
+                localMesh, localH,
+                NP::face_output_iterator(std::back_inserter(patchFaces))
+                   .vertex_output_iterator(std::back_inserter(patchVerts))
+                   .fairing_continuity(1)
+            );
+            if (!ok && patchFaces.empty() && CGAL::is_border(localH, localMesh)) {
+                PMP::triangulate_and_refine_hole(
+                    localMesh, localH,
+                    NP::face_output_iterator(std::back_inserter(patchFaces))
+                       .vertex_output_iterator(std::back_inserter(patchVerts))
+                );
+                ok = !patchFaces.empty();
+            }
+            if (!ok && patchFaces.empty()) continue;
+
+            auto lvMap = localMesh.add_property_map<Mesh::Vertex_index, int32_t>("v:res_idx", 0).first;
+            for (size_t i = 0; i < lvHandles.size(); ++i) {
+                lvMap[lvHandles[i]] = static_cast<int32_t>(i);
+            }
+            res.newVerts.reserve(patchVerts.size());
+            for (auto pv : patchVerts) {
+                if (localMesh.is_valid(pv)) {
+                    int32_t idx = -1 - static_cast<int32_t>(res.newVerts.size());
+                    lvMap[pv] = idx;
+                    res.newVerts.push_back(localMesh.point(pv));
+                }
+            }
+            res.newTris.reserve(patchFaces.size());
+            for (auto pf : patchFaces) {
+                if (!localMesh.is_valid(pf)) continue;
+                std::array<int32_t, 3> tri{};
+                int k = 0;
+                for (auto v : CGAL::vertices_around_face(localMesh.halfedge(pf), localMesh)) {
+                    if (k < 3) tri[k] = lvMap[v];
+                    ++k;
+                }
+                if (k == 3) res.newTris.push_back(tri);
+            }
+            res.ok = !res.newTris.empty();
+        }
+
+        // Merge parallel patch results back into main mesh
+        std::vector<Mesh::Vertex_index> addedV;
+        for (size_t ji = 0; ji < jobs.size(); ++ji) {
+            const auto& job = jobs[ji];
+            const auto& res = results[ji];
+            if (!res.ok) continue;
+
+            addedV.resize(res.newVerts.size());
+            for (size_t i = 0; i < res.newVerts.size(); ++i) {
+                auto nv = mesh.add_vertex(res.newVerts[i]);
+                vOrigMap[nv] = -1;
+                addedV[i] = nv;
+            }
+
+            bool allAdded = true;
+            for (const auto& t : res.newTris) {
+                auto v0 = (t[0] >= 0) ? job.globalV[t[0]] : addedV[-1 - t[0]];
+                auto v1 = (t[1] >= 0) ? job.globalV[t[1]] : addedV[-1 - t[1]];
+                auto v2 = (t[2] >= 0) ? job.globalV[t[2]] : addedV[-1 - t[2]];
+                auto nf = mesh.add_face(v0, v1, v2);
+                if (nf == Mesh::null_face()) {
+                    allAdded = false;
+                } else {
+                    fGroupMap[nf] = fillGroup;
+                    fIsPatch[nf] = 1;
+                }
+            }
+            if (allAdded) {
+                holeDone[job.holeIdx] = 1;
+                ++stats.holesFilled;
+            }
+        }
+    }
+
     for (size_t hi = 0; hi < holes.size(); ++hi) {
+        if (holeDone[hi]) continue;
         auto h = holes[hi];
         if (hasOuterHull && h == outerHull) continue;
         if (!CGAL::is_border(h, mesh)) continue;
