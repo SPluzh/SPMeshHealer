@@ -4,6 +4,7 @@
 #include <CGAL/IO/STL.h>
 
 #include <array>
+#include <charconv>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -91,9 +92,73 @@ bool readSTL(const std::string& path, RawMeshData& out) {
             }
         }
     }
-    std::fclose(fp);
+    // Fast path for ASCII STL: read whole file and parse "vertex x y z" via std::from_chars
+    if (fileSize > 0) {
+        std::fseek(fp, 0, SEEK_SET);
+        std::string text;
+        text.resize(static_cast<size_t>(fileSize));
+        size_t bytesRead = std::fread(text.data(), 1, text.size(), fp);
+        std::fclose(fp);
+        fp = nullptr;
+        text.resize(bytesRead);
 
-    // Fallback: ASCII STL via CGAL
+        const size_t estTris = bytesRead / 160;
+        out.faces.reserve(estTris * 4);
+        out.verts.reserve(estTris * 2);
+        std::unordered_map<PosKey, uint32_t, PosHash> vMap;
+        vMap.reserve(estTris);
+
+        const char* cur = text.data();
+        const char* const end = cur + text.size();
+        uint32_t triIdx[3] = {0, 0, 0};
+        int vInTri = 0;
+
+        while (cur < end) {
+            const char* nl = static_cast<const char*>(std::memchr(cur, '\n', static_cast<size_t>(end - cur)));
+            const char* lineEnd = nl ? nl : end;
+            const char* p = cur;
+            cur = nl ? (nl + 1) : end;
+
+            while (p < lineEnd && (*p == ' ' || *p == '\t' || *p == '\r')) ++p;
+            if (p + 7 <= lineEnd && std::memcmp(p, "vertex", 6) == 0 && (p[6] == ' ' || p[6] == '\t')) {
+                p += 7;
+                float coords[3] = {0.0f, 0.0f, 0.0f};
+                bool ok = true;
+                for (int c = 0; c < 3; ++c) {
+                    while (p < lineEnd && (*p == ' ' || *p == '\t')) ++p;
+                    auto res = std::from_chars(p, lineEnd, coords[c]);
+                    if (res.ec != std::errc()) { ok = false; break; }
+                    p = res.ptr;
+                    coords[c] = normalizeZero(coords[c]);
+                }
+                if (!ok) continue;
+
+                PosKey key{coords[0], coords[1], coords[2]};
+                auto [it, inserted] = vMap.emplace(key, static_cast<uint32_t>(out.verts.size() / 3));
+                if (inserted) {
+                    out.verts.push_back(coords[0]);
+                    out.verts.push_back(coords[1]);
+                    out.verts.push_back(coords[2]);
+                }
+                triIdx[vInTri++] = it->second;
+                if (vInTri == 3) {
+                    out.faces.push_back(triIdx[0]);
+                    out.faces.push_back(triIdx[1]);
+                    out.faces.push_back(triIdx[2]);
+                    out.faces.push_back(0xFFFFFFFFu);
+                    vInTri = 0;
+                }
+            } else if (p + 8 <= lineEnd && std::memcmp(p, "endfacet", 8) == 0) {
+                vInTri = 0;
+            }
+        }
+        if (out.vertCount() > 0 && out.faceCount() > 0) return true;
+        out.verts.clear();
+        out.faces.clear();
+    }
+    if (fp) std::fclose(fp);
+
+    // Fallback: CGAL STL reader
     std::vector<std::array<double, 3>> points;
     std::vector<std::vector<std::size_t>> facets;
     if (!CGAL::IO::read_STL(path, points, facets)) return false;
