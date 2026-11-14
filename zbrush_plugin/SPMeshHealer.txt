@@ -1,0 +1,169 @@
+// SPMeshHealer ZBrush Plugin (ZBrush 2021 - 2026+)
+// Single-button CGAL mesh & scan repair without hardcoded paths.
+
+[VarDef, dllPath, ""]
+[VarDef, dllVer, 0]
+[VarDef, exePath, ""]
+[VarDef, configPath, ""]
+[VarDef, expPath, ""]
+[VarDef, impPath, ""]
+[VarDef, nl, ""]
+
+[RoutineDef, CheckSystem,
+	[VarSet, isMac, [ZBrushInfo, 6]]
+	[If, isMac == 1,
+		[Note, "SPMeshHealer currently supports Windows only."]
+		[Exit]
+	]
+	[VarSet, dllPath, [FileNameResolvePath, "SPMeshHealerData/ZFileUtils64.dll"]]
+	[If, [FileExists, dllPath],
+		[VarSet, dllVer, [FileExecute, [Var, dllPath], "Version"]]
+		[If, dllVer < 8.0,
+			[Note, "ZFileUtils64.dll version is too old."]
+			[Exit]
+		]
+	,
+		[Note, "ZFileUtils64.dll not found in SPMeshHealerData."]
+		[Exit]
+	]
+]
+
+[RoutineDef, ResolvePaths,
+	[VarSet, nl, [StrMerge, [StrFromAsc, 13], [StrFromAsc, 10]]]
+	[VarSet, exePath, [FileNameResolvePath, "SPMeshHealerData/SPMeshHealer.exe"]]
+	[VarSet, configPath, [FileNameResolvePath, "SPMeshHealerData/config.txt"]]
+
+	// Determine extension from UI switches (default: GoZ)
+	[VarSet, ext, ".goz"]
+	[If, [IGet, "ZPlugin:SPMeshHealer:Format OBJ"] == 1, [VarSet, ext, ".obj"]]
+	[If, [IGet, "ZPlugin:SPMeshHealer:Format STL"] == 1, [VarSet, ext, ".stl"]]
+
+	// Use ZBrush Public data folder if available, otherwise SPMeshHealerData
+	[VarSet, pubFolder, [FileNameResolvePath, "ZBRUSH_ZPUBLIC"]]
+	[If, [StrLength, pubFolder] > 0,
+		[VarSet, expPath, [StrMerge, pubFolder, "/SPMeshHealer_in", ext]]
+		[VarSet, impPath, [StrMerge, pubFolder, "/SPMeshHealer_out", ext]]
+	,
+		[VarSet, expPath, [FileNameResolvePath, [StrMerge, "SPMeshHealerData/SPMeshHealer_in", ext]]]
+		[VarSet, impPath, [FileNameResolvePath, [StrMerge, "SPMeshHealerData/SPMeshHealer_out", ext]]]
+	]
+]
+
+[RoutineDef, WriteConfig,
+	[VarSet, hullVal, [IGet, "ZPlugin:SPMeshHealer:Ignore Largest Hole"]]
+	[VarSet, pgVal, [IGet, "ZPlugin:SPMeshHealer:Preserve PolyGroups"]]
+	[VarSet, quadsVal, [IGet, "ZPlugin:SPMeshHealer:Keep Quads"]]
+	[VarSet, fragVal, [IGet, "ZPlugin:SPMeshHealer:Remove Small Fragments"]]
+	[VarSet, cfgBuf, [StrMerge, "hull = ", hullVal, nl]]
+	[VarSet, cfgBuf, [StrMerge, cfgBuf, "preservePolygroups = ", pgVal, nl]]
+	[VarSet, cfgBuf, [StrMerge, cfgBuf, "keepQuads = ", quadsVal, nl]]
+	[VarSet, cfgBuf, [StrMerge, cfgBuf, "removeFragments = ", fragVal, nl]]
+	[VarSet, cfgBuf, [StrMerge, cfgBuf, "minFaces = 50", nl]]
+	[VarSet, cfgBuf, [StrMerge, cfgBuf, "minFraction = 0.01", nl]]
+	[VarSet, cfgBuf, [StrMerge, cfgBuf, "fixOrientation = 1", nl]]
+	[VarSet, cfgBuf, [StrMerge, cfgBuf, "inFile = ", expPath, nl]]
+	[VarSet, cfgBuf, [StrMerge, cfgBuf, "outFile = ", impPath, nl]]
+
+	[If, [MemGetSize, SPMH_CfgMem], [MemDelete, SPMH_CfgMem]]
+	[MemCreate, SPMH_CfgMem, 4096, 0]
+	[MemWriteString, SPMH_CfgMem, cfgBuf, 0, 0]
+	[VarSet, tmpCfg, [StrMerge, configPath, ".tmp"]]
+	[If, [FileExists, tmpCfg], [FileExecute, [Var, dllPath], "FileDelete", #tmpCfg]]
+	[VarSet, err, [FileExecute, [Var, dllPath], "FileWrite", #tmpCfg, , SPMH_CfgMem]]
+	[MemDelete, SPMH_CfgMem]
+	[If, [FileExists, configPath], [FileExecute, [Var, dllPath], "FileDelete", #configPath]]
+	[FileExecute, [Var, dllPath], "FileRename", #tmpCfg, #configPath]
+]
+
+[RoutineDef, HealMesh,
+	[RoutineCall, CheckSystem]
+	[RoutineCall, ResolvePaths]
+
+	[If, [FileExists, exePath], ,
+		[Note, [StrMerge, "SPMeshHealer.exe not found at:", nl, exePath]]
+		[Exit]
+	]
+
+	// Clean stale temp files
+	[If, [FileExists, expPath], [FileExecute, [Var, dllPath], "FileDelete", #expPath]]
+	[If, [FileExists, impPath], [FileExecute, [Var, dllPath], "FileDelete", #impPath]]
+
+	// 1. Export active SubTool
+	[FileNameSetNext, expPath]
+	[IPress, Tool:Export]
+	[If, [FileExists, expPath], ,
+		[Note, [StrMerge, "Failed to export mesh to:", nl, expPath]]
+		[Exit]
+	]
+
+	// 2. Write config with temp paths & options, then launch SPMeshHealer.exe
+	[RoutineCall, WriteConfig]
+	[VarSet, err, [FileExecute, [Var, dllPath], "LaunchAppWithFile", #exePath]]
+
+	// 3. Wait for atomic output file (up to 60 seconds)
+	[VarSet, found, 0]
+	[Loop, 600,
+		[If, [FileExists, impPath],
+			[VarSet, found, 1]
+			[LoopExit]
+		]
+		[Delay, 0.1]
+	]
+
+	// 4. Import healed mesh & clean up temp files
+	[If, found == 1,
+		[FileNameSetNext, impPath]
+		[IPress, Tool:Import]
+		[NoteBar, "SPMeshHealer: Mesh healed successfully."]
+	,
+		[Note, "SPMeshHealer timed out or failed to produce output."]
+	]
+
+	[If, [FileExists, expPath], [FileExecute, [Var, dllPath], "FileDelete", #expPath]]
+	[If, [FileExists, impPath], [FileExecute, [Var, dllPath], "FileDelete", #impPath]]
+]
+
+[ISubPalette, "ZPlugin:SPMeshHealer"]
+
+[IButton, "ZPlugin:SPMeshHealer:Heal Mesh", "Export, repair holes/geometry via CGAL SPMeshHealer, and re-import in one click.",
+	[RoutineCall, HealMesh]
+, 0, 1]
+
+[ISwitch, "ZPlugin:SPMeshHealer:Preserve PolyGroups", 1, "Preserve input PolyGroups and assign a new PolyGroup to filled holes.",
+	[IEnable, "ZPlugin:SPMeshHealer:Preserve PolyGroups"]
+,
+	[IEnable, "ZPlugin:SPMeshHealer:Preserve PolyGroups"]
+, 0, 1]
+
+[ISwitch, "ZPlugin:SPMeshHealer:Keep Quads", 1, "Preserve input quads/polygons and append only newly filled hole patches.",
+	[IEnable, "ZPlugin:SPMeshHealer:Keep Quads"]
+,
+	[IEnable, "ZPlugin:SPMeshHealer:Keep Quads"]
+, 0, 1]
+
+[ISwitch, "ZPlugin:SPMeshHealer:Ignore Largest Hole", 0, "Skip the largest open boundary loop (useful for 3D scans and open busts).",
+	[IEnable, "ZPlugin:SPMeshHealer:Ignore Largest Hole"]
+,
+	[IEnable, "ZPlugin:SPMeshHealer:Ignore Largest Hole"]
+, 0, 1]
+
+[ISwitch, "ZPlugin:SPMeshHealer:Remove Small Fragments", 0, "Remove small disconnected mesh islands.",
+	[IEnable, "ZPlugin:SPMeshHealer:Remove Small Fragments"]
+,
+	[IEnable, "ZPlugin:SPMeshHealer:Remove Small Fragments"]
+, 0, 1]
+
+[ISwitch, "ZPlugin:SPMeshHealer:Format GoZ", 1, "Use GoZ binary format (fastest, preserves PolyGroups/Mask/Paint).",
+	[IUnPress, "ZPlugin:SPMeshHealer:Format OBJ"]
+	[IUnPress, "ZPlugin:SPMeshHealer:Format STL"]
+, , 0, 0.33]
+
+[ISwitch, "ZPlugin:SPMeshHealer:Format OBJ", 0, "Use OBJ format (universal, preserves PolyGroups).",
+	[IUnPress, "ZPlugin:SPMeshHealer:Format GoZ"]
+	[IUnPress, "ZPlugin:SPMeshHealer:Format STL"]
+, , 0, 0.33]
+
+[ISwitch, "ZPlugin:SPMeshHealer:Format STL", 0, "Use STL format (raw scan soup repair).",
+	[IUnPress, "ZPlugin:SPMeshHealer:Format GoZ"]
+	[IUnPress, "ZPlugin:SPMeshHealer:Format OBJ"]
+, , 0, 0.34]

@@ -1,0 +1,8 @@
+# SPMeshHealer Configuration
+hull = 0
+preservePolygroups = 1
+keepQuads = 1
+removeFragments = 0
+minFaces = 50
+minFraction = 0.01
+fixOrientation = 1

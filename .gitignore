@@ -1,0 +1,8 @@
+build/
+dist/
+*.exe
+zbrush_plugin/SPMeshHealerData/lib*.dll
+*.log
+*.tmp
+.DS_Store
+Thumbs.db
