@@ -60,12 +60,18 @@ fs::path getTempWorkDir() {
 
 class FileLogger {
 public:
-    explicit FileLogger(const fs::path& logPath) {
+    explicit FileLogger(const fs::path& logPath, const fs::path& fallbackPath = {}) {
         std::error_code ec;
         if (logPath.has_parent_path()) {
             fs::create_directories(logPath.parent_path(), ec);
         }
         m_file.open(logPath, std::ios::app);
+        if (!m_file.is_open() && !fallbackPath.empty()) {
+            if (fallbackPath.has_parent_path()) {
+                fs::create_directories(fallbackPath.parent_path(), ec);
+            }
+            m_file.open(fallbackPath, std::ios::app);
+        }
     }
 
     void write(const std::string& msg, bool toStdout = true, bool toStderr = false) {
@@ -179,7 +185,8 @@ int main(int argc, char* argv[]) {
     std::string outPath;
     std::string cfgInPath;
     std::string cfgOutPath;
-    fs::path logPath = getTempWorkDir() / "SPMeshHealer.log";
+    fs::path logPath = exeDir / "SPMeshHealer.log";
+    const fs::path fallbackLogPath = getTempWorkDir() / "SPMeshHealer.log";
     bool forceBin = false;
     bool hullExplicit = false;
     bool repairSoupExplicit = false;
@@ -197,7 +204,7 @@ int main(int argc, char* argv[]) {
         }
     }
     loadConfigFile(configPath, opts, cfgInPath, cfgOutPath);
-    FileLogger logger(logPath);
+    FileLogger logger(logPath, fallbackLogPath);
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
