@@ -135,7 +135,7 @@
 
 [IButton, "ZPlugin:SPMeshHealer:Heal Mesh", "Export, repair holes/geometry via CGAL SPMeshHealer, and re-import in one click.",
 	[RoutineCall, HealMesh]
-, 0, 1, , , 40]
+, 0, 1, , , 64]
 
 [ISwitch, "ZPlugin:SPMeshHealer:Preserve PolyGroups", 1, "Preserve input PolyGroups and assign a new PolyGroup to filled holes.",
 	[IEnable, "ZPlugin:SPMeshHealer:Preserve PolyGroups"]
