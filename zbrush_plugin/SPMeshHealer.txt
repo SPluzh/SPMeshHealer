@@ -38,15 +38,9 @@
 	[If, [IGet, "ZPlugin:SPMeshHealer:Format OBJ"] == 1, [VarSet, ext, ".obj"]]
 	[If, [IGet, "ZPlugin:SPMeshHealer:Format STL"] == 1, [VarSet, ext, ".stl"]]
 
-	// Use ZBrush Public data folder if available, otherwise SPMeshHealerData
-	[VarSet, pubFolder, [FileNameResolvePath, "ZBRUSH_ZPUBLIC"]]
-	[If, [StrLength, pubFolder] > 0,
-		[VarSet, expPath, [StrMerge, pubFolder, "/SPMeshHealer_in", ext]]
-		[VarSet, impPath, [StrMerge, pubFolder, "/SPMeshHealer_out", ext]]
-	,
-		[VarSet, expPath, [FileNameResolvePath, [StrMerge, "SPMeshHealerData/SPMeshHealer_in", ext]]]
-		[VarSet, impPath, [FileNameResolvePath, [StrMerge, "SPMeshHealerData/SPMeshHealer_out", ext]]]
-	]
+	// Resolve temp I/O paths inside SPMeshHealerData
+	[VarSet, expPath, [FileNameResolvePath, [StrMerge, "SPMeshHealerData/SPMeshHealer_in", ext]]]
+	[VarSet, impPath, [FileNameResolvePath, [StrMerge, "SPMeshHealerData/SPMeshHealer_out", ext]]]
 ]
 
 [RoutineDef, WriteConfig,
