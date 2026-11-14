@@ -1,5 +1,5 @@
 # SPMeshHealer Configuration
-hull = 0
+hull = 1
 preservePolygroups = 1
 keepQuads = 1
 removeFragments = 0

@@ -7,7 +7,7 @@ from zbrush import commands as zbc
 
 PLUGIN_PALETTE = "ZPlugin:SPMeshHealer"
 _state = {
-    "hull": False,
+    "hull": True,
     "remove_fragments": False,
     "format": ".goz",
 }

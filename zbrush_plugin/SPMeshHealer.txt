@@ -149,7 +149,7 @@
 	[IEnable, "ZPlugin:SPMeshHealer:Keep Quads"]
 , 0, 1]
 
-[ISwitch, "ZPlugin:SPMeshHealer:Ignore Largest Hole", 0, "Skip the largest open boundary loop (useful for 3D scans and open busts).",
+[ISwitch, "ZPlugin:SPMeshHealer:Ignore Largest Hole", 1, "Skip the largest open boundary loop (useful for 3D scans and open busts).",
 	[IEnable, "ZPlugin:SPMeshHealer:Ignore Largest Hole"]
 ,
 	[IEnable, "ZPlugin:SPMeshHealer:Ignore Largest Hole"]
