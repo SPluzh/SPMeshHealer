@@ -120,6 +120,15 @@
 
 	// 4. Import healed mesh & clean up temp files
 	[If, found == 1,
+		[If, [IGet, "ZPlugin:SPMeshHealer:Replace SubTool"] == 0,
+			[VarSet, origIdx, [SubToolGetActiveIndex]]
+			[IPress, Tool:SubTool:Duplicate]
+			[VarSet, newIdx, [SubToolGetActiveIndex]]
+			[VarSet, stOrig, [SubToolGetStatus, origIdx]]
+			[If, [BitAnd, stOrig, 1] == 1, [SubToolSetStatus, origIdx, stOrig - 1]]
+			[VarSet, stNew, [SubToolGetStatus, newIdx]]
+			[If, [BitAnd, stNew, 1] == 0, [SubToolSetStatus, newIdx, stNew + 1]]
+		]
 		[FileNameSetNext, impPath]
 		[IPress, Tool:Import]
 		[NoteBar, "SPMeshHealer: Mesh healed successfully."]
@@ -165,6 +174,12 @@
 	[IEnable, "ZPlugin:SPMeshHealer:Show Console"]
 ,
 	[IEnable, "ZPlugin:SPMeshHealer:Show Console"]
+, 0, 1]
+
+[ISwitch, "ZPlugin:SPMeshHealer:Replace SubTool", 1, "ON = replace active SubTool. OFF = hide original and import healed mesh as a new SubTool.",
+	[IEnable, "ZPlugin:SPMeshHealer:Replace SubTool"]
+,
+	[IEnable, "ZPlugin:SPMeshHealer:Replace SubTool"]
 , 0, 1]
 
 [ISwitch, "ZPlugin:SPMeshHealer:Format GoZ", 1, "Use GoZ binary format (fastest, preserves PolyGroups/Mask/Paint).",
